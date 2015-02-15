@@ -1,0 +1,10 @@
+#!/bin/bash
+result=`ps -ef  | grep 'zha cluster' | grep -v grep | wc -l`
+if [ "$result" == "0" ]
+then
+   echo "zha already stoppend                            [FAILED]"
+else 
+   kill -9 `ps -ef  | grep 'zha cluster' | grep -v grep | awk ' { print $2 } '`
+   echo "zha stopped                                     [  OK  ]"
+fi 
+exit 0

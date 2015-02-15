@@ -1,0 +1,18 @@
+#!/bin/bash
+base=/usr/local/zha
+log=$base/log/zha.`date +%d.%m.%y`.log
+
+result=`ps -ef  | grep 'zha cluster' | grep -v grep | wc -l`
+if [ "$result" == "0" ]
+then
+       (
+       echo -e "\n\n\n==========================================================================================================================================="
+       $base/zha cluster
+       ) >> $log 2>&1 &
+       echo "Starting zha:                                      [  OK  ]"
+else 
+       echo "Starting zha:"  
+       echo "`ps -ef  | grep 'zha cluster' | grep -v grep`"
+       echo "zha already running                                [FAILED]" 
+fi 
+exit 0

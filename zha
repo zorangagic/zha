@@ -1,0 +1,147 @@
+#!/bin/bash
+# zha.sh - High availability Clustering for AWS
+#
+# Zoran Gagic - zorang at gmail.com
+#
+# Copyright (C) 2015  Zoran Gagic
+
+# This program is free software; you can redistribute it and/or
+# modify it under the terms of the GNU General Public License
+# as published by the Free Software Foundation; either version 2
+# of the License, or (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA
+
+[ "$1" != "cluster" ] && exit 1
+base=/usr/local/zha
+log=$base//log/zha.`date +%d.%m.%y`.log
+
+supportemail=zorang@gmail.com
+num_pings=10
+ping_timeout=1
+wait_between_pings=10
+wait_for_instance_stop=25
+shared_ip=172.30.0.59
+shared_eni_id=eni-22522955
+shared_ebs_id=vol-6262b565
+shared_fs_name=/data
+app_start=$base/start-nfs.sh
+app_stop=$base/stop-nfs.sh
+app_status=$base/status-nfs.sh
+#
+shared_eni_attach_id=`aws ec2 describe-network-interfaces --network-interface-ids $shared_eni_id | grep AttachmentId | cut -d'"' -f4`
+current_instance_id=`wget -q -O - http://169.254.169.254/latest/meta-data/instance-id`
+primary_instance_id=`aws ec2 describe-instances --output text --filters "Name=tag-key, Values=HA_ROLE, Name=tag-value, Values=PRIMARY" --output json | grep -i instanceId | cut -d'"' -f4`
+secondary_instance_id=`aws ec2 describe-instances --output text --filters "Name=tag-key, Values=HA_ROLE, Name=tag-value, Values=SECONDARY" --output json | grep -i instanceId | cut -d'"' -f4`
+other_instance_id=$(( $current_instance_id == $secondary_instance_id ? $primary_instance_id : $secondary_instance_id ))
+[[ $current_instance_id = $secondary_instance_id ]] && other_instance_id="$primary_instance_id" || other_instance_id="$secondary_instance_id"
+export EC2_URL=ec2.ap-southeast-2.amazonaws.com
+
+
+alert() {
+     echo $1 | mailx -s "HA Error: `hostname` `date`" $supportemail
+}
+
+wait-for-failure() {
+     pingresult=`ping -c $num_pings -W $ping_timeout $shared_ip | grep time= | wc -l`
+     while [ "$pingresult" != "0" ]
+     do
+       echo `date` "-- ping result = $pingresult out of $num_pings"
+       sleep $wait_between_pings
+       pingresult=`ping -c $num_pings -W $ping_timeout $shared_ip | grep time= | wc -l`
+     done
+     echo -e "\n\n`date` -- wait-for-failure - detected ping failure"
+}
+
+stop-instance() {
+      echo -e "\n\n`date` -- stop-instance - starting stop of instance $other_instance_id"
+      # stop other instance (just in case still running, ensures resources are not used)
+      # Check instance state to see if we should stop it 
+      INSTANCE_STATE=`/opt/aws/bin/ec2-describe-instances $other_instance_id | grep INSTANCE | awk '{print $5;}'`
+      if [ "$INSTANCE_STATE" == "stopped" ]; then
+        echo `date` "-- instance already stopped"
+      else
+        echo `date` "-- ec2-stop-instances $other_instance_id, state:$INSTANCE_STATE, attempting to stop"
+        /opt/aws/bin/ec2-stop-instances $other_instance_id
+        sleep $wait_for_instance_stop
+        /opt/aws/bin/ec2-detach-volume $shared_ebs_id
+        /opt/aws/bin/ec2-detach-network-interface $shared_eni_attach_id
+        sleep 5
+
+        INSTANCE_STATE=`/opt/aws/bin/ec2-describe-instances $other_instance_id | grep INSTANCE | awk '{print $5;}'`
+        echo `date` "-- ec2-describe-instances $other_instance_id, state:$INSTANCE_STATE"
+        if [ "$INSTANCE_STATE" == "stopped" ]; then
+            echo `date` "-- stop-instance of instance $other_instance_id successful"
+        else
+            echo  "`date` -- stop-instance of instance $other_instance_id failed"
+            alert "`date` -- stop-instance of instance $other_instance_id failed"
+        fi
+      fi
+}
+
+takeover-ip() {
+	echo -e "\n\n`date` -- takeover-ip - starting takover of $shared_ip"
+	/opt/aws/bin/ec2-attach-network-interface $shared_eni_id -i $current_instance_id -d 1
+	sleep 20
+
+        ifresult=`ifconfig -a | grep $shared_ip | wc -l` 
+        if [ "$ifresult" == "0" ]; then
+            echo  "`date` -- takeover-ip - Could not take over IP address $shared_ip"
+            alert "`date` -- takeover-ip - Could not take over IP address $shared_ip"
+            exit 1
+        else
+            echo `date` "-- takeover-ip $shared_ip successful"
+        fi
+}
+
+
+takeover-storage() {
+	echo -e "\n\n`date` -- takeover-storage - starting takover of $shared_fs_name"
+	/opt/aws/bin/ec2-attach-volume $shared_ebs_id -i $current_instance_id -d /dev/sdb
+        sleep 10
+	# mount filesystem
+	echo `date` "-- mount $shared_fs_name"
+	mount $shared_fs_name
+
+        dfresult=`df -h | grep $shared_fs_name | wc -l` 
+        if [ "$dfresult" == "0" ]; then
+            echo   "`date` -- takeover-storage - Could not mount $shared_fs_name"
+            alert  "`date` -- takeover-storage - Could not mount $shared_fs_name"
+            exit 1
+        else
+            echo `date` "-- takeover-storage $shared_fs_name successful"
+        fi
+}
+
+takeover-app() {
+	echo -e "\n\n`date` -- takeover-app - starting takover of $app_start"
+	$app_start
+        appresult=`$app_status| grep -i ok | wc -l` 
+        if [ "$appresult" == "0" ]; then
+	    echo  "`date` -- takeover-app - Could not start app $app_start"
+	    alert "`date` -- takeover-app - Could not start app $app_start"
+            exit 1
+        else
+	    echo "`date` -- takeover-app - $app_start successful"
+        fi
+}
+
+
+# Main
+echo "`date` -- zha starting"
+wait-for-failure
+stop-instance
+takeover-ip
+takeover-storage
+takeover-app
+echo "`date` -- Failover to other instance complete"
+alert "`date` -- Failover to other instance complete"
+
+exit 0

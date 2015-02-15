@@ -1,0 +1,35 @@
+
+
+
+===========================================================================================================================================
+
+
+Sat Feb 14 12:14:37 UTC 2015 -- detected ping failure
+
+
+Sat Feb 14 12:14:37 UTC 2015 -- stop-instance - starting stop of instance i-a60ef468
+Sat Feb 14 12:14:41 UTC 2015 -- ec2-stop-instances i-a60ef468, state:running, attempting to stop
+INSTANCE	i-a60ef468	running	stopping
+Client.IncorrectState: Volume 'vol-6262b565'is in the 'available' state. (Service: AmazonEC2; Status Code: 400; Error Code: IncorrectState; Request ID: 72c6c622-35e2-4edf-9129-4a9da496dd83)
+Required parameter 'NICATTACHMENTS' missing (-h for usage)
+Sat Feb 14 12:15:18 UTC 2015 -- ec2-describe-instances i-a60ef468, state:stopped
+Sat Feb 14 12:15:18 UTC 2015 -- stop-instance of instance i-a60ef468 successful
+
+
+Sat Feb 14 12:15:18 UTC 2015 -- takeover-ip - starting takover of 172.30.0.59
+eni-attach-dcbc22e3
+Sat Feb 14 12:15:20 UTC 2015 -- takeover-ip - Could not take over IP address 172.30.0.59
+/usr/local/zha/zha: line 29: mailx: command not found
+
+
+
+===========================================================================================================================================
+Sat Feb 14 12:29:26 UTC 2015 -- zha starting
+
+
+Sat Feb 14 12:29:36 UTC 2015 -- wait-for-failure - detected ping failure
+
+
+Sat Feb 14 12:29:36 UTC 2015 -- takeover-ip - starting takover of 172.30.0.59
+eni-attach-99bd23a6
+Sat Feb 14 12:29:38 UTC 2015 -- takeover-ip - Could not take over IP address 172.30.0.59

@@ -1,0 +1,9 @@
+#!/bin/bash
+result=`ps -ef  | grep 'zha cluster' | grep -v grep | wc -l`
+if [ "$result" == "0" ]
+then
+   echo "zha is stooped"
+else 
+   echo "zha is running - `ps -ef  | grep 'zha cluster' | grep -v grep`"
+fi 
+exit 0
